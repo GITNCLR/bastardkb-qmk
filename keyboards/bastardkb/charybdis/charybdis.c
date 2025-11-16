@@ -51,6 +51,14 @@
 #        define CHARYBDIS_DRAGSCROLL_BUFFER_SIZE 6
 #    endif // !CHARYBDIS_DRAGSCROLL_BUFFER_SIZE
 
+#    ifndef CHARYBDIS_SCROLL_RATE_LIMIT_MS
+#        define CHARYBDIS_SCROLL_RATE_LIMIT_MS 16  // ~60Hz scroll rate
+#    endif // !CHARYBDIS_SCROLL_RATE_LIMIT_MS
+
+#    ifndef CHARYBDIS_SCROLL_SNAP_RATIO
+#        define CHARYBDIS_SCROLL_SNAP_RATIO 3  // Snap to axis if movement is 3x stronger in one direction
+#    endif // !CHARYBDIS_SCROLL_SNAP_RATIO
+
 typedef union {
     uint8_t raw;
     struct {
@@ -62,6 +70,11 @@ typedef union {
 } charybdis_config_t;
 
 static charybdis_config_t g_charybdis_config = {0};
+
+
+static int16_t scroll_buffer_x = 0;
+static int16_t scroll_buffer_y = 0;
+static uint32_t last_scroll_time = 0;
 
 /**
  * \brief Set the value of `config` from EEPROM.
@@ -179,11 +192,9 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
 /**
  * \brief Augment the pointing device behavior.
  *
- * Implement drag-scroll.
+ * Implement drag-scroll with rate limiting.
  */
 static void pointing_device_task_charybdis(report_mouse_t* mouse_report) {
-    static int16_t scroll_buffer_x = 0;
-    static int16_t scroll_buffer_y = 0;
     if (g_charybdis_config.is_dragscroll_enabled) {
 #    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_X
         scroll_buffer_x -= mouse_report->x;
@@ -197,13 +208,46 @@ static void pointing_device_task_charybdis(report_mouse_t* mouse_report) {
 #    endif // CHARYBDIS_DRAGSCROLL_REVERSE_Y
         mouse_report->x = 0;
         mouse_report->y = 0;
-        if (abs(scroll_buffer_x) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE) {
-            mouse_report->h = scroll_buffer_x > 0 ? 1 : -1;
-            scroll_buffer_x = 0;
-        }
-        if (abs(scroll_buffer_y) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE) {
-            mouse_report->v = scroll_buffer_y > 0 ? 1 : -1;
-            scroll_buffer_y = 0;
+        
+        // Rate limit scroll events
+        uint32_t current_time = timer_read32();
+        if (timer_elapsed32(last_scroll_time) >= CHARYBDIS_SCROLL_RATE_LIMIT_MS) {
+            // Check if either buffer exceeds threshold
+            bool x_ready = abs(scroll_buffer_x) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE;
+            bool y_ready = abs(scroll_buffer_y) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE;
+            
+            if (x_ready || y_ready) {
+                // Implement directional snapping
+                int16_t abs_x = abs(scroll_buffer_x);
+                int16_t abs_y = abs(scroll_buffer_y);
+                
+                // If one direction is significantly stronger, snap to that direction only
+                if (abs_x >= abs_y * CHARYBDIS_SCROLL_SNAP_RATIO) {
+                    // Snap to horizontal scrolling only
+                    mouse_report->h += scroll_buffer_x;
+                    scroll_buffer_x = 0;
+                    scroll_buffer_y = 0;  // Clear the weaker direction
+                    last_scroll_time = current_time;
+                } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
+                    // Snap to vertical scrolling only
+                    mouse_report->v += scroll_buffer_y;
+                    scroll_buffer_y = 0;
+                    scroll_buffer_x = 0;  // Clear the weaker direction
+                    last_scroll_time = current_time;
+                } else {
+                    // Both directions are similar, allow both
+                    if (x_ready) {
+                        mouse_report->h += scroll_buffer_x;
+                        scroll_buffer_x = 0;
+                        last_scroll_time = current_time;
+                    }
+                    if (y_ready) {
+                        mouse_report->v += scroll_buffer_y;
+                        scroll_buffer_y = 0;
+                        last_scroll_time = current_time;
+                    }
+                }
+            }
         }
     }
 }
