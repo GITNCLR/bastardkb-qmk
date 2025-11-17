@@ -199,29 +199,27 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
 
 
 static int8_t charybdis_smooth_step(int32_t *buffer) {
-    // Convert accumulated motion into a small wheel step.
     int32_t val = *buffer;
-
     if (val == 0) {
         return 0;
     }
 
+    // Convert accumulated motion into scroll units
     int32_t step = val / CHARYBDIS_SCROLL_STEP_DIVISOR;
 
-    // Ensure at least +/-1 once we've moved past the deadzone
+    // If we haven't reached a whole "chunk" yet, don't scroll
     if (step == 0) {
-        step = (val > 0) ? 1 : -1;
+        return 0;
     }
 
-    // Clamp step size so we never send giant jumps
+    // Clamp the per-frame step size
     if (step > CHARYBDIS_SCROLL_MAX_STEP) {
         step = CHARYBDIS_SCROLL_MAX_STEP;
     } else if (step < -CHARYBDIS_SCROLL_MAX_STEP) {
         step = -CHARYBDIS_SCROLL_MAX_STEP;
     }
 
-    // Remove what we actually used from the buffer
-    *buffer -= step;
+    *buffer -= step * CHARYBDIS_SCROLL_STEP_DIVISOR;
 
     return (int8_t)step;
 }
