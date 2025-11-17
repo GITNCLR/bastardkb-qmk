@@ -189,64 +189,113 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
     maybe_update_pointing_device_cpi(&g_charybdis_config);
 }
 
+// Tune these to taste
+#define CHARYBDIS_SCROLL_STEP_DIVISOR  8   // higher = smaller per-frame steps
+#define CHARYBDIS_SCROLL_MAX_STEP      6   // clamp per-frame wheel delta
+
+static int8_t charybdis_smooth_step(int32_t *buffer) {
+    // Convert accumulated motion into a small wheel step.
+    int32_t val = *buffer;
+
+    if (val == 0) {
+        return 0;
+    }
+
+    int32_t step = val / CHARYBDIS_SCROLL_STEP_DIVISOR;
+
+    // Ensure at least +/-1 once we've moved past the deadzone
+    if (step == 0) {
+        step = (val > 0) ? 1 : -1;
+    }
+
+    // Clamp step size so we never send giant jumps
+    if (step > CHARYBDIS_SCROLL_MAX_STEP) {
+        step = CHARYBDIS_SCROLL_MAX_STEP;
+    } else if (step < -CHARYBDIS_SCROLL_MAX_STEP) {
+        step = -CHARYBDIS_SCROLL_MAX_STEP;
+    }
+
+    // Remove what we actually used from the buffer
+    *buffer -= step;
+
+    return (int8_t)step;
+}
+
 /**
  * \brief Augment the pointing device behavior.
  *
- * Implement drag-scroll with rate limiting.
+ * Implement hi-res drag-scroll with rate limiting and axis snapping.
  */
-static void pointing_device_task_charybdis(report_mouse_t* mouse_report) {
-    if (g_charybdis_config.is_dragscroll_enabled) {
-#    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_X
-        scroll_buffer_x -= mouse_report->x;
-#    else
-        scroll_buffer_x += mouse_report->x;
-#    endif // CHARYBDIS_DRAGSCROLL_REVERSE_X
-#    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_Y
-        scroll_buffer_y -= mouse_report->y;
-#    else
-        scroll_buffer_y += mouse_report->y;
-#    endif // CHARYBDIS_DRAGSCROLL_REVERSE_Y
-        mouse_report->x = 0;
-        mouse_report->y = 0;
-        
-        // Rate limit scroll events
-        uint32_t current_time = timer_read32();
-        if (timer_elapsed32(last_scroll_time) >= CHARYBDIS_SCROLL_RATE_LIMIT_MS) {
-            // Check if either buffer exceeds threshold
-            bool x_ready = abs(scroll_buffer_x) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE;
-            bool y_ready = abs(scroll_buffer_y) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE;
-            
-            if (x_ready || y_ready) {
-                // Implement directional snapping
-                int16_t abs_x = abs(scroll_buffer_x);
-                int16_t abs_y = abs(scroll_buffer_y);
-                
-                // If one direction is significantly stronger, snap to that direction only
-                if (abs_x >= abs_y * CHARYBDIS_SCROLL_SNAP_RATIO) {
-                    // Snap to horizontal scrolling only
-                    mouse_report->h += scroll_buffer_x;
-                    scroll_buffer_x = 0;
-                    scroll_buffer_y = 0;  // Clear the weaker direction
-                    last_scroll_time = current_time;
-                } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
-                    // Snap to vertical scrolling only
-                    mouse_report->v += scroll_buffer_y;
-                    scroll_buffer_y = 0;
-                    scroll_buffer_x = 0;  // Clear the weaker direction
-                    last_scroll_time = current_time;
-                } else {
-                    // Both directions are similar, allow both
-                    if (x_ready) {
-                        mouse_report->h += scroll_buffer_x;
-                        scroll_buffer_x = 0;
-                        last_scroll_time = current_time;
-                    }
-                    if (y_ready) {
-                        mouse_report->v += scroll_buffer_y;
-                        scroll_buffer_y = 0;
-                        last_scroll_time = current_time;
-                    }
-                }
+static void pointing_device_task_charybdis(report_mouse_t *mouse_report) {
+    if (!g_charybdis_config.is_dragscroll_enabled) {
+        return;
+    }
+
+    // 1) Accumulate raw motion into scroll buffers
+#ifdef CHARYBDIS_DRAGSCROLL_REVERSE_X
+    scroll_buffer_x -= mouse_report->x;
+#else
+    scroll_buffer_x += mouse_report->x;
+#endif
+
+#ifdef CHARYBDIS_DRAGSCROLL_REVERSE_Y
+    scroll_buffer_y -= mouse_report->y;
+#else
+    scroll_buffer_y += mouse_report->y;
+#endif
+
+    // Don't move the cursor in dragscroll mode
+    mouse_report->x = 0;
+    mouse_report->y = 0;
+
+    // 2) Throttle how often we emit scroll events
+    uint32_t now = timer_read32();
+    if (timer_elapsed32(last_scroll_time) < CHARYBDIS_SCROLL_RATE_LIMIT_MS) {
+        return;
+    }
+
+    bool x_ready = (abs(scroll_buffer_x) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE);
+    bool y_ready = (abs(scroll_buffer_y) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE);
+
+    if (!x_ready && !y_ready) {
+        return;
+    }
+
+    int32_t abs_x = abs(scroll_buffer_x);
+    int32_t abs_y = abs(scroll_buffer_y);
+
+    // 3) Axis snapping, as recommended in the QMK docs for hi-res scroll
+    if (abs_x >= abs_y * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        // Horizontal scroll only
+        int8_t step_x = charybdis_smooth_step(&scroll_buffer_x);
+        if (step_x != 0) {
+            mouse_report->h += step_x;
+            // Optionally bleed off diagonal residue
+            scroll_buffer_y /= 2;
+            last_scroll_time = now;
+        }
+    } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        // Vertical scroll only
+        int8_t step_y = charybdis_smooth_step(&scroll_buffer_y);
+        if (step_y != 0) {
+            mouse_report->v += step_y;
+            scroll_buffer_x /= 2;
+            last_scroll_time = now;
+        }
+    } else {
+        // Allow diagonal scrolling if both are similar
+        if (x_ready) {
+            int8_t step_x = charybdis_smooth_step(&scroll_buffer_x);
+            if (step_x != 0) {
+                mouse_report->h += step_x;
+                last_scroll_time = now;
+            }
+        }
+        if (y_ready) {
+            int8_t step_y = charybdis_smooth_step(&scroll_buffer_y);
+            if (step_y != 0) {
+                mouse_report->v += step_y;
+                last_scroll_time = now;
             }
         }
     }
