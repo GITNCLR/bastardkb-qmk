@@ -53,5 +53,6 @@
             "fileMatch": ["keymap.json"],
             "url": "./data/schemas/keymap.jsonschema"
         }
-    ]
+    ],
+    "editor.defaultFormatter": "xaver.clang-format"
 }

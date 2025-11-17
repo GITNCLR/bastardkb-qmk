@@ -52,20 +52,24 @@
 #    endif // !CHARYBDIS_DRAGSCROLL_BUFFER_SIZE
 
 #    ifndef CHARYBDIS_SCROLL_RATE_LIMIT_MS
-#        define CHARYBDIS_SCROLL_RATE_LIMIT_MS 16  // ~60Hz scroll rate
-#    endif // !CHARYBDIS_SCROLL_RATE_LIMIT_MS
+#        define CHARYBDIS_SCROLL_RATE_LIMIT_MS 16 // ~60Hz scroll rate
+#    endif                                        // !CHARYBDIS_SCROLL_RATE_LIMIT_MS
 
 #    ifndef CHARYBDIS_SCROLL_SNAP_RATIO
-#        define CHARYBDIS_SCROLL_SNAP_RATIO 3  // Snap to axis if movement is 3x stronger in one direction
-#    endif // !CHARYBDIS_SCROLL_SNAP_RATIO
+#        define CHARYBDIS_SCROLL_SNAP_RATIO 3 // Snap to axis if movement is 3x stronger in one direction
+#    endif                                    // !CHARYBDIS_SCROLL_SNAP_RATIO
 
-#   ifndef CHARYBDIS_SCROLL_STEP_DIVISOR
-#       define CHARYBDIS_SCROLL_STEP_DIVISOR 8   // higher = smaller per-frame steps
-#   endif // !CHARYBDIS_SCROLL_STEP_DIVISOR
+#    ifndef CHARYBDIS_SCROLL_STEP_DIVISOR
+#        define CHARYBDIS_SCROLL_STEP_DIVISOR 8 // higher = smaller per-frame steps
+#    endif                                      // !CHARYBDIS_SCROLL_STEP_DIVISOR
 
-#   ifndef CHARYBDIS_SCROLL_MAX_STEP
-#       define CHARYBDIS_SCROLL_MAX_STEP 6   // clamp per-frame wheel delta
-#   endif // !CHARYBDIS_SCROLL_MAX_STEP
+#    ifndef CHARYBDIS_SCROLL_MAX_STEP
+#        define CHARYBDIS_SCROLL_MAX_STEP 6 // clamp per-frame wheel delta
+#    endif                                  // !CHARYBDIS_SCROLL_MAX_STEP
+
+#    ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
+#        include "pointing_device_auto_mouse.h"
+#    endif
 
 typedef union {
     uint8_t raw;
@@ -79,9 +83,8 @@ typedef union {
 
 static charybdis_config_t g_charybdis_config = {0};
 
-
-static int32_t scroll_buffer_x = 0;
-static int32_t scroll_buffer_y = 0;
+static int32_t  scroll_buffer_x  = 0;
+static int32_t  scroll_buffer_y  = 0;
 static uint32_t last_scroll_time = 0;
 
 /**
@@ -92,7 +95,7 @@ static uint32_t last_scroll_time = 0;
  * this state is always written to maximize write-performances.  Therefore, we
  * explicitly set them to `false` in this function.
  */
-static void read_charybdis_config_from_eeprom(charybdis_config_t* config) {
+static void read_charybdis_config_from_eeprom(charybdis_config_t *config) {
     config->raw                   = eeconfig_read_kb() & 0xff;
     config->is_dragscroll_enabled = false;
     config->is_sniping_enabled    = false;
@@ -106,22 +109,22 @@ static void read_charybdis_config_from_eeprom(charybdis_config_t* config) {
  * resets these 2 values to `false` since it does not make sense to persist
  * these across reboots of the board.
  */
-static void write_charybdis_config_to_eeprom(charybdis_config_t* config) {
+static void write_charybdis_config_to_eeprom(charybdis_config_t *config) {
     eeconfig_update_kb(config->raw);
 }
 
 /** \brief Return the current value of the pointer's default DPI. */
-static uint16_t get_pointer_default_dpi(charybdis_config_t* config) {
+static uint16_t get_pointer_default_dpi(charybdis_config_t *config) {
     return (uint16_t)config->pointer_default_dpi * CHARYBDIS_DEFAULT_DPI_CONFIG_STEP + CHARYBDIS_MINIMUM_DEFAULT_DPI;
 }
 
 /** \brief Return the current value of the pointer's sniper-mode DPI. */
-static uint16_t get_pointer_sniping_dpi(charybdis_config_t* config) {
+static uint16_t get_pointer_sniping_dpi(charybdis_config_t *config) {
     return (uint16_t)config->pointer_sniping_dpi * CHARYBDIS_SNIPING_DPI_CONFIG_STEP + CHARYBDIS_MINIMUM_SNIPING_DPI;
 }
 
 /** \brief Set the appropriate DPI for the input config. */
-static void maybe_update_pointing_device_cpi(charybdis_config_t* config) {
+static void maybe_update_pointing_device_cpi(charybdis_config_t *config) {
     if (config->is_dragscroll_enabled) {
         pointing_device_set_cpi(CHARYBDIS_DRAGSCROLL_DPI);
     } else if (config->is_sniping_enabled) {
@@ -137,7 +140,7 @@ static void maybe_update_pointing_device_cpi(charybdis_config_t* config) {
  * Increases the DPI value if `forward` is `true`, decreases it otherwise.
  * The increment/decrement steps are equal to CHARYBDIS_DEFAULT_DPI_CONFIG_STEP.
  */
-static void step_pointer_default_dpi(charybdis_config_t* config, bool forward) {
+static void step_pointer_default_dpi(charybdis_config_t *config, bool forward) {
     config->pointer_default_dpi += forward ? 1 : -1;
     maybe_update_pointing_device_cpi(config);
 }
@@ -148,7 +151,7 @@ static void step_pointer_default_dpi(charybdis_config_t* config, bool forward) {
  * Increases the DPI value if `forward` is `true`, decreases it otherwise.
  * The increment/decrement steps are equal to CHARYBDIS_SNIPING_DPI_CONFIG_STEP.
  */
-static void step_pointer_sniping_dpi(charybdis_config_t* config, bool forward) {
+static void step_pointer_sniping_dpi(charybdis_config_t *config, bool forward) {
     config->pointer_sniping_dpi += forward ? 1 : -1;
     maybe_update_pointing_device_cpi(config);
 }
@@ -197,7 +200,6 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
     maybe_update_pointing_device_cpi(&g_charybdis_config);
 }
 
-
 static int8_t charybdis_smooth_step(int32_t *buffer) {
     int32_t val = *buffer;
     if (val == 0) {
@@ -235,17 +237,17 @@ static void pointing_device_task_charybdis(report_mouse_t *mouse_report) {
     }
 
     // 1) Accumulate raw motion into scroll buffers
-#ifdef CHARYBDIS_DRAGSCROLL_REVERSE_X
+#    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_X
     scroll_buffer_x -= mouse_report->x;
-#else
+#    else
     scroll_buffer_x += mouse_report->x;
-#endif
+#    endif
 
-#ifdef CHARYBDIS_DRAGSCROLL_REVERSE_Y
+#    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_Y
     scroll_buffer_y -= mouse_report->y;
-#else
+#    else
     scroll_buffer_y += mouse_report->y;
-#endif
+#    endif
 
     // Don't move the cursor in dragscroll mode
     mouse_report->x = 0;
@@ -334,7 +336,7 @@ static bool has_shift_mod(void) {
  *   - default DPI: internal table index/actual DPI
  *   - sniping DPI: internal table index/actual DPI
  */
-static void debug_charybdis_config_to_console(charybdis_config_t* config) {
+static void debug_charybdis_config_to_console(charybdis_config_t *config) {
 #    ifdef CONSOLE_ENABLE
     dprintf("(charybdis) process_record_kb: config = {\n"
             "\traw = 0x%X,\n"
@@ -349,7 +351,7 @@ static void debug_charybdis_config_to_console(charybdis_config_t* config) {
 #    endif // CONSOLE_ENABLE
 }
 
-bool process_record_kb(uint16_t keycode, keyrecord_t* record) {
+bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     if (!process_record_user(keycode, record)) {
         debug_charybdis_config_to_console(&g_charybdis_config);
         return false;
@@ -394,7 +396,21 @@ bool process_record_kb(uint16_t keycode, keyrecord_t* record) {
             break;
         case DRAGSCROLL_MODE_TOGGLE:
             if (record->event.pressed) {
-                charybdis_set_pointer_dragscroll_enabled(!charybdis_get_pointer_dragscroll_enabled());
+                bool new_state = !charybdis_get_pointer_dragscroll_enabled();
+                charybdis_set_pointer_dragscroll_enabled(new_state);
+
+#            ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
+                // Keep auto mouse's target layer from timing out while dragscroll is latched.
+                bool toggled = get_auto_mouse_toggle();
+
+                if (new_state && !toggled) {
+                    // Dragscroll just turned ON → lock the auto mouse layer (no timeout)
+                    auto_mouse_toggle();
+                } else if (!new_state && toggled) {
+                    // Dragscroll just turned OFF → unlock, allow timeout again
+                    auto_mouse_toggle();
+                }
+#            endif
             }
             break;
     }
@@ -419,7 +435,7 @@ void matrix_init_kb(void) {
 }
 
 #    ifdef CHARYBDIS_CONFIG_SYNC
-void charybdis_config_sync_handler(uint8_t initiator2target_buffer_size, const void* initiator2target_buffer, uint8_t target2initiator_buffer_size, void* target2initiator_buffer) {
+void charybdis_config_sync_handler(uint8_t initiator2target_buffer_size, const void *initiator2target_buffer, uint8_t target2initiator_buffer_size, void *target2initiator_buffer) {
     if (initiator2target_buffer_size == sizeof(g_charybdis_config)) {
         memcpy(&g_charybdis_config, initiator2target_buffer, sizeof(g_charybdis_config));
     }
