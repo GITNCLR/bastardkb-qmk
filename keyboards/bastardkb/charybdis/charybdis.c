@@ -72,8 +72,8 @@ typedef union {
 static charybdis_config_t g_charybdis_config = {0};
 
 
-static int16_t scroll_buffer_x = 0;
-static int16_t scroll_buffer_y = 0;
+static int32_t scroll_buffer_x = 0;
+static int32_t scroll_buffer_y = 0;
 static uint32_t last_scroll_time = 0;
 
 /**
