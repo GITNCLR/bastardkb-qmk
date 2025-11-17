@@ -45,7 +45,7 @@
 // Fixed DPI for drag-scroll.
 #    ifndef CHARYBDIS_DRAGSCROLL_DPI
 #        define CHARYBDIS_DRAGSCROLL_DPI 100
-#    endif // CHARYBDIS_DRAGSCROLL_DPI
+#    endif // !CHARYBDIS_DRAGSCROLL_DPI
 
 #    ifndef CHARYBDIS_DRAGSCROLL_BUFFER_SIZE
 #        define CHARYBDIS_DRAGSCROLL_BUFFER_SIZE 6
@@ -58,6 +58,14 @@
 #    ifndef CHARYBDIS_SCROLL_SNAP_RATIO
 #        define CHARYBDIS_SCROLL_SNAP_RATIO 3  // Snap to axis if movement is 3x stronger in one direction
 #    endif // !CHARYBDIS_SCROLL_SNAP_RATIO
+
+#   ifndef CHARYBDIS_SCROLL_STEP_DIVISOR
+#       define CHARYBDIS_SCROLL_STEP_DIVISOR 8   // higher = smaller per-frame steps
+#   endif // !CHARYBDIS_SCROLL_STEP_DIVISOR
+
+#   ifndef CHARYBDIS_SCROLL_MAX_STEP
+#       define CHARYBDIS_SCROLL_MAX_STEP 6   // clamp per-frame wheel delta
+#   endif // !CHARYBDIS_SCROLL_MAX_STEP
 
 typedef union {
     uint8_t raw;
@@ -189,9 +197,6 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
     maybe_update_pointing_device_cpi(&g_charybdis_config);
 }
 
-// Tune these to taste
-#define CHARYBDIS_SCROLL_STEP_DIVISOR  8   // higher = smaller per-frame steps
-#define CHARYBDIS_SCROLL_MAX_STEP      6   // clamp per-frame wheel delta
 
 static int8_t charybdis_smooth_step(int32_t *buffer) {
     // Convert accumulated motion into a small wheel step.
