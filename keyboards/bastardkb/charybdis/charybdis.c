@@ -393,6 +393,14 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
             break;
         case DRAGSCROLL_MODE:
             charybdis_set_pointer_dragscroll_enabled(record->event.pressed);
+#            ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
+            // toggle auto mouse if not already toggled
+            bool toggled = get_auto_mouse_toggle();
+            if (!toggled) {
+                auto_mouse_toggle();
+            }
+#            endif
+
             break;
         case DRAGSCROLL_MODE_TOGGLE:
             if (record->event.pressed) {
