@@ -466,7 +466,7 @@ __attribute__((weak)) bool is_mouse_record_user(uint16_t keycode, keyrecord_t *r
  *
  * @return uint16_t time remaining in ms
  */
-uint16_t auto_mouse_get_time_remaining(void) {
+uint16_t auto_mouse_get_time_elapsed(void) {
     // If we’ve never activated, or have been reset, there is no countdown.
     uint16_t start = auto_mouse_context.timer.active;
     // Elapsed time since auto-mouse was last active
