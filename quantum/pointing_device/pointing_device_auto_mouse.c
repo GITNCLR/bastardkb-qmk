@@ -467,21 +467,12 @@ __attribute__((weak)) bool is_mouse_record_user(uint16_t keycode, keyrecord_t *r
  * @return uint16_t time remaining in ms
  */
 uint16_t auto_mouse_get_time_remaining(void) {
-    uint16_t timeout = auto_mouse_context.config.timeout;
-
     // If we’ve never activated, or have been reset, there is no countdown.
     uint16_t start = auto_mouse_context.timer.active;
-    if (!start) {
-        return 0;
-    }
-
     // Elapsed time since auto-mouse was last active
     uint16_t elapsed = timer_elapsed(start);
-    if (elapsed >= timeout) {
-        return 0;
-    }
 
-    return timeout - elapsed;
+    return elapsed;
 }
 
 #endif // POINTING_DEVICE_AUTO_MOUSE_ENABLE
