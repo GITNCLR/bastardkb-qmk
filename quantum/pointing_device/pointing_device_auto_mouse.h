@@ -112,4 +112,4 @@ bool process_auto_mouse(uint16_t keycode, keyrecord_t *record);    // add to pro
  * Remaining time (ms) until auto-mouse timeout.
  * Returns 0 if disabled, layer off, or timer not running.
  */
-uint16_t auto_mouse_get_time_remaining(void);
+uint16_t auto_mouse_get_time_elapsed(void);
