@@ -467,32 +467,20 @@ __attribute__((weak)) bool is_mouse_record_user(uint16_t keycode, keyrecord_t *r
  * @return uint16_t time remaining in ms
  */
 uint16_t auto_mouse_get_time_remaining(void) {
-    if (!(AUTO_MOUSE_ENABLED)) {
-        return 0;
-    }
-
     uint16_t timeout = auto_mouse_context.config.timeout;
-    if (!timeout) {
-        timeout = AUTO_MOUSE_TIME;
-    }
-    if (!timeout) {
+
+    // If we’ve never activated, or have been reset, there is no countdown.
+    uint16_t start = auto_mouse_context.timer.active;
+    if (!start) {
         return 0;
     }
 
-    // If the target layer isn't on, treat as no active countdown.
-    if (!layer_state_is((AUTO_MOUSE_TARGET_LAYER))) {
-        return 0;
-    }
-
-    // If timer.active is 0, either we've never started or have been reset.
-    if (auto_mouse_context.timer.active == 0) {
-        return 0;
-    }
-
-    uint16_t elapsed = timer_elapsed(auto_mouse_context.timer.active);
+    // Elapsed time since auto-mouse was last active
+    uint16_t elapsed = timer_elapsed(start);
     if (elapsed >= timeout) {
         return 0;
     }
+
     return timeout - elapsed;
 }
 
