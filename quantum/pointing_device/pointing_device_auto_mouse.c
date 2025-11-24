@@ -462,14 +462,12 @@ __attribute__((weak)) bool is_mouse_record_user(uint16_t keycode, keyrecord_t *r
 
 /* ----------Custom Getters---------------------------------------------------------------------------------- */
 /**
- * @brief Get time remaining before auto mouse layer times out
+ * @brief Get time elapsed since auto mouse layer was activated
  *
- * @return uint16_t time remaining in ms
+ * @return uint16_t time elapsed in ms
  */
 uint16_t auto_mouse_get_time_elapsed(void) {
-    // If we’ve never activated, or have been reset, there is no countdown.
-    uint16_t start = auto_mouse_context.timer.active;
-    // Elapsed time since auto-mouse was last active
+    uint16_t start   = auto_mouse_context.timer.active;
     uint16_t elapsed = timer_elapsed(start);
 
     return elapsed;
