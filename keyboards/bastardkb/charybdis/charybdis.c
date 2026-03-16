@@ -207,6 +207,7 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
     maybe_update_pointing_device_cpi(&g_charybdis_config);
 }
 
+#    ifndef POINTING_DEVICE_HIRES_SCROLL_ENABLE
 /**
  * \brief Legacy scroll step for non-hi-res mode.
  *
@@ -235,7 +236,9 @@ static int8_t charybdis_smooth_step(int32_t *buffer) {
 
     return (int8_t)step;
 }
+#    endif // !POINTING_DEVICE_HIRES_SCROLL_ENABLE
 
+#    ifdef POINTING_DEVICE_HIRES_SCROLL_ENABLE
 /**
  * \brief Clamp a value to the mouse h/v report range.
  */
@@ -250,7 +253,6 @@ static inline int32_t clamp_hv(int32_t val) {
  *
  * When one axis dominates by CHARYBDIS_SCROLL_SNAP_RATIO, lock to that
  * axis and decay the other.  Otherwise allow diagonal scrolling.
- * The emit callback writes the chosen step into the mouse report.
  */
 static bool charybdis_emit_scroll(report_mouse_t *mouse_report, int32_t sx, int32_t sy) {
     int32_t abs_x = abs(sx);
@@ -284,6 +286,7 @@ static bool charybdis_emit_scroll(report_mouse_t *mouse_report, int32_t sx, int3
     }
     return emitted;
 }
+#    endif // POINTING_DEVICE_HIRES_SCROLL_ENABLE
 
 /**
  * \brief Augment the pointing device behavior.
