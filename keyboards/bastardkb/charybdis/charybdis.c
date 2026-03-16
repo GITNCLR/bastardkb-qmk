@@ -249,38 +249,60 @@ static inline int32_t clamp_hv(int32_t val) {
 }
 
 /**
+ * \brief Scale a buffer value by the step divisor, consuming only what was emitted.
+ *
+ * Returns the scaled step and subtracts the consumed portion from the buffer,
+ * leaving the fractional remainder for the next frame.  Unlike the legacy path
+ * this never returns 0 when the buffer exceeds the divisor — it always emits
+ * proportionally, which is what makes hi-res scrolling smooth.
+ */
+static int32_t charybdis_hires_consume(int32_t *buffer) {
+    int32_t val  = *buffer;
+    int32_t step = val / CHARYBDIS_SCROLL_STEP_DIVISOR;
+    if (step == 0) {
+        return 0;
+    }
+    *buffer -= step * CHARYBDIS_SCROLL_STEP_DIVISOR;
+    return step;
+}
+
+/**
  * \brief Apply axis snapping and emit scroll values.
  *
  * When one axis dominates by CHARYBDIS_SCROLL_SNAP_RATIO, lock to that
  * axis and decay the other.  Otherwise allow diagonal scrolling.
  */
-static bool charybdis_emit_scroll(report_mouse_t *mouse_report, int32_t sx, int32_t sy) {
-    int32_t abs_x = abs(sx);
-    int32_t abs_y = abs(sy);
+static bool charybdis_emit_scroll(report_mouse_t *mouse_report) {
+    int32_t abs_x = abs(scroll_buffer_x);
+    int32_t abs_y = abs(scroll_buffer_y);
     bool    emitted = false;
 
     if (abs_x >= abs_y * CHARYBDIS_SCROLL_SNAP_RATIO) {
         // Horizontal only
-        mouse_report->h += clamp_hv(sx);
-        scroll_buffer_x = 0;
-        scroll_buffer_y /= 2; // decay cross-axis residue
-        emitted = true;
-    } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
-        // Vertical only
-        mouse_report->v += clamp_hv(sy);
-        scroll_buffer_y = 0;
-        scroll_buffer_x /= 2;
-        emitted = true;
-    } else {
-        // Diagonal
-        if (abs_x > 0) {
-            mouse_report->h += clamp_hv(sx);
-            scroll_buffer_x = 0;
+        int32_t step = charybdis_hires_consume(&scroll_buffer_x);
+        if (step != 0) {
+            mouse_report->h += clamp_hv(step);
+            scroll_buffer_y /= 2; // decay cross-axis residue
             emitted = true;
         }
-        if (abs_y > 0) {
-            mouse_report->v += clamp_hv(sy);
-            scroll_buffer_y = 0;
+    } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        // Vertical only
+        int32_t step = charybdis_hires_consume(&scroll_buffer_y);
+        if (step != 0) {
+            mouse_report->v += clamp_hv(step);
+            scroll_buffer_x /= 2;
+            emitted = true;
+        }
+    } else {
+        // Diagonal
+        int32_t step_x = charybdis_hires_consume(&scroll_buffer_x);
+        if (step_x != 0) {
+            mouse_report->h += clamp_hv(step_x);
+            emitted = true;
+        }
+        int32_t step_y = charybdis_hires_consume(&scroll_buffer_y);
+        if (step_y != 0) {
+            mouse_report->v += clamp_hv(step_y);
             emitted = true;
         }
     }
@@ -345,9 +367,10 @@ static void pointing_device_task_charybdis(report_mouse_t *mouse_report) {
     }
 
 #    ifdef POINTING_DEVICE_HIRES_SCROLL_ENABLE
-    // ── Hi-res path: emit the full buffer proportionally ──
-    // Each unit is 1/resolution of a notch, so emit freely.
-    if (charybdis_emit_scroll(mouse_report, scroll_buffer_x, scroll_buffer_y)) {
+    // ── Hi-res path: emit scaled buffer proportionally ──
+    // Each unit is 1/resolution of a notch.  The divisor controls
+    // the ratio of sensor counts to hi-res scroll units.
+    if (charybdis_emit_scroll(mouse_report)) {
         last_scroll_time = now;
     }
 #    else
