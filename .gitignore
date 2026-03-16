@@ -120,3 +120,6 @@ compile_commands.json
 via*.json
 /keyboards/**/keymaps/via/*
 /keyboards/**/keymaps/vial/*
+
+# Personal keymap (symlink to iCloud)
+/keyboards/bastardkb/charybdis/4x6/keymaps/noah
