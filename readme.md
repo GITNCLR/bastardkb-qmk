@@ -1,10 +1,10 @@
-# Charybdis 4x6 — QMK 0.32 Port
+# Charybdis 4x6 — QMK Firmware (RP2040)
 
-Fork of [QMK Firmware](https://github.com/qmk/qmk_firmware) (`0.32.5`, branch `qmk-latest`) with the BastardKB Charybdis 4x6 RP2040 board definition ported forward from the [BastardKB fork](https://github.com/Bastardkb/bastardkb-qmk) (`bkb-master`).
+Fork of [QMK Firmware](https://github.com/qmk/qmk_firmware) with the BastardKB Charybdis 4x6 RP2040 board definition. The `qmk-latest` branch tracks QMK upstream (currently `0.32.5`) with the Charybdis board definition and a small core patch on top.
 
 ## Why this exists
 
-BastardKB's fork last synced with QMK at `0.29.0` (May 2025). QMK upstream only has Charybdis board definitions for Elite-C and Blackpill (no RP2040). This branch brings the RP2040 board definition onto QMK 0.32.
+QMK upstream only has Charybdis board definitions for Elite-C and Blackpill — no RP2040. The [BastardKB fork](https://github.com/Bastardkb/bastardkb-qmk) has the RP2040 definition but last synced with QMK at `0.29.0`. This repo ports the RP2040 board definition onto current QMK.
 
 ## Changes vs QMK 0.32 master
 
@@ -36,11 +36,14 @@ qmk compile -kb bastardkb/charybdis/4x6 -km default
 qmk compile -kb bastardkb/charybdis/4x6 -km noah
 ```
 
-## future qmk updates.
+## Updating to newer QMK
+
+```bash
 git fetch qmk
 git merge qmk/master
-# fix conflicts (likely charybdis.c, auto_mouse.c — the files I touched)
+# fix conflicts (likely charybdis.c, auto_mouse.c — the files we patched)
 # compile, test
+```
 
 ## Links
 
