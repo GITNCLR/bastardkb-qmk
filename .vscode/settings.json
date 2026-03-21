@@ -4,10 +4,29 @@
     "editor.insertSpaces": true,
     // Configure glob patterns for excluding files and folders.
     "files.exclude": {
-        "**/.build": true,
-        "**/*.hex": true,
-        "**/*.bin": true,
-        "**/*.uf2": true
+        "**/.DS_Store": true,
+        ".cache": true,
+        ".clang-format": true,
+        ".clangd": true,
+        ".editorconfig": true,
+        ".gitattributes": true,
+        ".github": true,
+        ".gitmodules": true,
+        "Doxyfile": true,
+        "LICENSE": true,
+        "Makefile": true,
+        "compile_commands.json": true,
+        "doxygen-todo": true,
+        "license_GPLv2.md": true,
+        "license_GPLv3.md": true,
+        "license_Modified_BSD.md": true,
+        "nose2.cfg": true,
+        "paths.mk": true,
+        "requirements-dev.txt": true,
+        "requirements.txt": true,
+        "setup.cfg": true,
+        ".gitignore": true,
+        ".build": true,
     },
     "files.associations": {
         // QMK Filetypes
@@ -53,5 +72,8 @@
             "fileMatch": ["keymap.json"],
             "url": "./data/schemas/keymap.jsonschema"
         }
-    ]
+    ],
+    "editor.defaultFormatter": "xaver.clang-format",
+    "cmake.ignoreCMakeListsMissing": true,
+    "git.detectSubmodules": false
 }

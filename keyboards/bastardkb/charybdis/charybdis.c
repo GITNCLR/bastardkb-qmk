@@ -45,11 +45,40 @@
 // Fixed DPI for drag-scroll.
 #    ifndef CHARYBDIS_DRAGSCROLL_DPI
 #        define CHARYBDIS_DRAGSCROLL_DPI 100
-#    endif // CHARYBDIS_DRAGSCROLL_DPI
+#    endif // !CHARYBDIS_DRAGSCROLL_DPI
 
 #    ifndef CHARYBDIS_DRAGSCROLL_BUFFER_SIZE
 #        define CHARYBDIS_DRAGSCROLL_BUFFER_SIZE 6
 #    endif // !CHARYBDIS_DRAGSCROLL_BUFFER_SIZE
+
+#    ifndef CHARYBDIS_SCROLL_RATE_LIMIT_MS
+#        define CHARYBDIS_SCROLL_RATE_LIMIT_MS 16 // ~60Hz scroll rate
+#    endif                                        // !CHARYBDIS_SCROLL_RATE_LIMIT_MS
+
+#    ifndef CHARYBDIS_SCROLL_SNAP_RATIO
+#        define CHARYBDIS_SCROLL_SNAP_RATIO 3 // Snap to axis if movement is 3x stronger in one direction
+#    endif                                    // !CHARYBDIS_SCROLL_SNAP_RATIO
+
+#    ifndef CHARYBDIS_SCROLL_STEP_DIVISOR
+#        define CHARYBDIS_SCROLL_STEP_DIVISOR 8 // higher = smaller per-frame steps
+#    endif                                      // !CHARYBDIS_SCROLL_STEP_DIVISOR
+
+#    ifndef CHARYBDIS_SCROLL_MAX_STEP
+#        define CHARYBDIS_SCROLL_MAX_STEP 6 // clamp per-frame wheel delta
+#    endif                                  // !CHARYBDIS_SCROLL_MAX_STEP
+
+// Maximum age (ms) of buffered motion before it is discarded.
+// Prevents "ghost scrolling" after the trackball stops.
+#    ifndef CHARYBDIS_SCROLL_BUFFER_EXPIRE_MS
+#        define CHARYBDIS_SCROLL_BUFFER_EXPIRE_MS 100
+#    endif
+
+#    ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
+#        include "pointing_device_auto_mouse.h"
+#    endif
+
+// Use labs() for int32_t to avoid -Wabsolute-value on hosts where int != int32_t.
+#    define ABS32(x) labs((long)(x))
 
 typedef union {
     uint8_t raw;
@@ -63,6 +92,11 @@ typedef union {
 
 static charybdis_config_t g_charybdis_config = {0};
 
+static int32_t  scroll_buffer_x      = 0;
+static int32_t  scroll_buffer_y      = 0;
+static uint32_t last_scroll_time     = 0;
+static uint32_t last_accumulate_time = 0;
+
 /**
  * \brief Set the value of `config` from EEPROM.
  *
@@ -71,7 +105,7 @@ static charybdis_config_t g_charybdis_config = {0};
  * this state is always written to maximize write-performances.  Therefore, we
  * explicitly set them to `false` in this function.
  */
-static void read_charybdis_config_from_eeprom(charybdis_config_t* config) {
+static void read_charybdis_config_from_eeprom(charybdis_config_t *config) {
     config->raw                   = eeconfig_read_kb() & 0xff;
     config->is_dragscroll_enabled = false;
     config->is_sniping_enabled    = false;
@@ -85,22 +119,22 @@ static void read_charybdis_config_from_eeprom(charybdis_config_t* config) {
  * resets these 2 values to `false` since it does not make sense to persist
  * these across reboots of the board.
  */
-static void write_charybdis_config_to_eeprom(charybdis_config_t* config) {
+static void write_charybdis_config_to_eeprom(charybdis_config_t *config) {
     eeconfig_update_kb(config->raw);
 }
 
 /** \brief Return the current value of the pointer's default DPI. */
-static uint16_t get_pointer_default_dpi(charybdis_config_t* config) {
+static uint16_t get_pointer_default_dpi(charybdis_config_t *config) {
     return (uint16_t)config->pointer_default_dpi * CHARYBDIS_DEFAULT_DPI_CONFIG_STEP + CHARYBDIS_MINIMUM_DEFAULT_DPI;
 }
 
 /** \brief Return the current value of the pointer's sniper-mode DPI. */
-static uint16_t get_pointer_sniping_dpi(charybdis_config_t* config) {
+static uint16_t get_pointer_sniping_dpi(charybdis_config_t *config) {
     return (uint16_t)config->pointer_sniping_dpi * CHARYBDIS_SNIPING_DPI_CONFIG_STEP + CHARYBDIS_MINIMUM_SNIPING_DPI;
 }
 
 /** \brief Set the appropriate DPI for the input config. */
-static void maybe_update_pointing_device_cpi(charybdis_config_t* config) {
+static void maybe_update_pointing_device_cpi(charybdis_config_t *config) {
     if (config->is_dragscroll_enabled) {
         pointing_device_set_cpi(CHARYBDIS_DRAGSCROLL_DPI);
     } else if (config->is_sniping_enabled) {
@@ -116,7 +150,7 @@ static void maybe_update_pointing_device_cpi(charybdis_config_t* config) {
  * Increases the DPI value if `forward` is `true`, decreases it otherwise.
  * The increment/decrement steps are equal to CHARYBDIS_DEFAULT_DPI_CONFIG_STEP.
  */
-static void step_pointer_default_dpi(charybdis_config_t* config, bool forward) {
+static void step_pointer_default_dpi(charybdis_config_t *config, bool forward) {
     config->pointer_default_dpi += forward ? 1 : -1;
     maybe_update_pointing_device_cpi(config);
 }
@@ -127,7 +161,7 @@ static void step_pointer_default_dpi(charybdis_config_t* config, bool forward) {
  * Increases the DPI value if `forward` is `true`, decreases it otherwise.
  * The increment/decrement steps are equal to CHARYBDIS_SNIPING_DPI_CONFIG_STEP.
  */
-static void step_pointer_sniping_dpi(charybdis_config_t* config, bool forward) {
+static void step_pointer_sniping_dpi(charybdis_config_t *config, bool forward) {
     config->pointer_sniping_dpi += forward ? 1 : -1;
     maybe_update_pointing_device_cpi(config);
 }
@@ -176,36 +210,208 @@ void charybdis_set_pointer_dragscroll_enabled(bool enable) {
     maybe_update_pointing_device_cpi(&g_charybdis_config);
 }
 
+#    ifndef POINTING_DEVICE_HIRES_SCROLL_ENABLE
+/**
+ * \brief Legacy scroll step for non-hi-res mode.
+ *
+ * Quantizes accumulated buffer into integer notch steps, leaving the
+ * remainder in the buffer for the next frame.
+ */
+static int8_t charybdis_smooth_step(int32_t *buffer) {
+    int32_t val = *buffer;
+    if (val == 0) {
+        return 0;
+    }
+
+    int32_t step = val / CHARYBDIS_SCROLL_STEP_DIVISOR;
+
+    if (step == 0) {
+        return 0;
+    }
+
+    if (step > CHARYBDIS_SCROLL_MAX_STEP) {
+        step = CHARYBDIS_SCROLL_MAX_STEP;
+    } else if (step < -CHARYBDIS_SCROLL_MAX_STEP) {
+        step = -CHARYBDIS_SCROLL_MAX_STEP;
+    }
+
+    *buffer -= step * CHARYBDIS_SCROLL_STEP_DIVISOR;
+
+    return (int8_t)step;
+}
+#    endif // !POINTING_DEVICE_HIRES_SCROLL_ENABLE
+
+#    ifdef POINTING_DEVICE_HIRES_SCROLL_ENABLE
+/**
+ * \brief Clamp a value to the mouse h/v report range.
+ */
+static inline int32_t clamp_hv(int32_t val) {
+    if (val > MOUSE_REPORT_HV_MAX) return MOUSE_REPORT_HV_MAX;
+    if (val < MOUSE_REPORT_HV_MIN) return MOUSE_REPORT_HV_MIN;
+    return val;
+}
+
+/**
+ * \brief Scale a buffer value by the step divisor, consuming only what was emitted.
+ *
+ * Returns the scaled step and subtracts the consumed portion from the buffer,
+ * leaving the fractional remainder for the next frame.  Unlike the legacy path
+ * this never returns 0 when the buffer exceeds the divisor — it always emits
+ * proportionally, which is what makes hi-res scrolling smooth.
+ */
+static int32_t charybdis_hires_consume(int32_t *buffer) {
+    int32_t val  = *buffer;
+    int32_t step = val / CHARYBDIS_SCROLL_STEP_DIVISOR;
+    if (step == 0) {
+        return 0;
+    }
+    *buffer -= step * CHARYBDIS_SCROLL_STEP_DIVISOR;
+    return step;
+}
+
+/**
+ * \brief Apply axis snapping and emit scroll values.
+ *
+ * When one axis dominates by CHARYBDIS_SCROLL_SNAP_RATIO, lock to that
+ * axis and decay the other.  Otherwise allow diagonal scrolling.
+ */
+static bool charybdis_emit_scroll(report_mouse_t *mouse_report) {
+    int32_t abs_x = ABS32(scroll_buffer_x);
+    int32_t abs_y = ABS32(scroll_buffer_y);
+    bool    emitted = false;
+
+    if (abs_x >= abs_y * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        // Horizontal only
+        int32_t step = charybdis_hires_consume(&scroll_buffer_x);
+        if (step != 0) {
+            mouse_report->h += clamp_hv(step);
+            scroll_buffer_y /= 2; // decay cross-axis residue
+            emitted = true;
+        }
+    } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        // Vertical only
+        int32_t step = charybdis_hires_consume(&scroll_buffer_y);
+        if (step != 0) {
+            mouse_report->v += clamp_hv(step);
+            scroll_buffer_x /= 2;
+            emitted = true;
+        }
+    } else {
+        // Diagonal
+        int32_t step_x = charybdis_hires_consume(&scroll_buffer_x);
+        if (step_x != 0) {
+            mouse_report->h += clamp_hv(step_x);
+            emitted = true;
+        }
+        int32_t step_y = charybdis_hires_consume(&scroll_buffer_y);
+        if (step_y != 0) {
+            mouse_report->v += clamp_hv(step_y);
+            emitted = true;
+        }
+    }
+    return emitted;
+}
+#    endif // POINTING_DEVICE_HIRES_SCROLL_ENABLE
+
 /**
  * \brief Augment the pointing device behavior.
  *
- * Implement drag-scroll.
+ * Implements drag-scroll with rate limiting and axis snapping.
+ * When hi-res scrolling is enabled, emits the full accumulated buffer
+ * each frame for smooth, proportional output.  Otherwise falls back to
+ * the legacy quantized smooth_step path.
  */
-static void pointing_device_task_charybdis(report_mouse_t* mouse_report) {
-    static int16_t scroll_buffer_x = 0;
-    static int16_t scroll_buffer_y = 0;
-    if (g_charybdis_config.is_dragscroll_enabled) {
+static void pointing_device_task_charybdis(report_mouse_t *mouse_report) {
+    if (!g_charybdis_config.is_dragscroll_enabled) {
+        return;
+    }
+
+    uint32_t now = timer_read32();
+
+    // 1) Accumulate raw motion into scroll buffers
+    if (mouse_report->x != 0 || mouse_report->y != 0) {
 #    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_X
         scroll_buffer_x -= mouse_report->x;
 #    else
         scroll_buffer_x += mouse_report->x;
-#    endif // CHARYBDIS_DRAGSCROLL_REVERSE_X
+#    endif
+
 #    ifdef CHARYBDIS_DRAGSCROLL_REVERSE_Y
         scroll_buffer_y -= mouse_report->y;
 #    else
         scroll_buffer_y += mouse_report->y;
-#    endif // CHARYBDIS_DRAGSCROLL_REVERSE_Y
-        mouse_report->x = 0;
-        mouse_report->y = 0;
-        if (abs(scroll_buffer_x) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE) {
-            mouse_report->h = scroll_buffer_x > 0 ? 1 : -1;
+#    endif
+        last_accumulate_time = now;
+    }
+
+    // Don't move the cursor in dragscroll mode
+    mouse_report->x = 0;
+    mouse_report->y = 0;
+
+    // 2) Expire stale buffer to prevent ghost scrolling
+    if (scroll_buffer_x != 0 || scroll_buffer_y != 0) {
+        if (timer_elapsed32(last_accumulate_time) > CHARYBDIS_SCROLL_BUFFER_EXPIRE_MS) {
             scroll_buffer_x = 0;
-        }
-        if (abs(scroll_buffer_y) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE) {
-            mouse_report->v = scroll_buffer_y > 0 ? 1 : -1;
             scroll_buffer_y = 0;
+            return;
         }
     }
+
+    // 3) Rate limit
+    if (timer_elapsed32(last_scroll_time) < CHARYBDIS_SCROLL_RATE_LIMIT_MS) {
+        return;
+    }
+
+    // 4) Dead zone
+    bool x_ready = (ABS32(scroll_buffer_x) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE);
+    bool y_ready = (ABS32(scroll_buffer_y) > CHARYBDIS_DRAGSCROLL_BUFFER_SIZE);
+    if (!x_ready && !y_ready) {
+        return;
+    }
+
+#    ifdef POINTING_DEVICE_HIRES_SCROLL_ENABLE
+    // ── Hi-res path: emit scaled buffer proportionally ──
+    // Each unit is 1/resolution of a notch.  The divisor controls
+    // the ratio of sensor counts to hi-res scroll units.
+    if (charybdis_emit_scroll(mouse_report)) {
+        last_scroll_time = now;
+    }
+#    else
+    // ── Legacy path: quantized integer-notch steps ──
+    int32_t abs_x = ABS32(scroll_buffer_x);
+    int32_t abs_y = ABS32(scroll_buffer_y);
+
+    if (abs_x >= abs_y * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        int8_t step_x = charybdis_smooth_step(&scroll_buffer_x);
+        if (step_x != 0) {
+            mouse_report->h += step_x;
+            scroll_buffer_y /= 2;
+            last_scroll_time = now;
+        }
+    } else if (abs_y >= abs_x * CHARYBDIS_SCROLL_SNAP_RATIO) {
+        int8_t step_y = charybdis_smooth_step(&scroll_buffer_y);
+        if (step_y != 0) {
+            mouse_report->v += step_y;
+            scroll_buffer_x /= 2;
+            last_scroll_time = now;
+        }
+    } else {
+        if (x_ready) {
+            int8_t step_x = charybdis_smooth_step(&scroll_buffer_x);
+            if (step_x != 0) {
+                mouse_report->h += step_x;
+                last_scroll_time = now;
+            }
+        }
+        if (y_ready) {
+            int8_t step_y = charybdis_smooth_step(&scroll_buffer_y);
+            if (step_y != 0) {
+                mouse_report->v += step_y;
+                last_scroll_time = now;
+            }
+        }
+    }
+#    endif
 }
 
 report_mouse_t pointing_device_task_kb(report_mouse_t mouse_report) {
@@ -238,7 +444,7 @@ static bool has_shift_mod(void) {
  *   - default DPI: internal table index/actual DPI
  *   - sniping DPI: internal table index/actual DPI
  */
-static void debug_charybdis_config_to_console(charybdis_config_t* config) {
+static void debug_charybdis_config_to_console(charybdis_config_t *config) {
 #    ifdef CONSOLE_ENABLE
     dprintf("(charybdis) process_record_kb: config = {\n"
             "\traw = 0x%X,\n"
@@ -253,7 +459,28 @@ static void debug_charybdis_config_to_console(charybdis_config_t* config) {
 #    endif // CONSOLE_ENABLE
 }
 
-bool process_record_kb(uint16_t keycode, keyrecord_t* record) {
+#    ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
+/**
+ * \brief Tell auto_mouse that Charybdis pointing-device keycodes are mouse keys.
+ *
+ * Without this, pressing SNIPING_MODE_TOGGLE or DRAGSCROLL_MODE_TOGGLE
+ * triggers auto_mouse_reset_trigger(), which kills the auto-mouse timer
+ * and deactivates the target layer.
+ */
+bool is_mouse_record_kb(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        case SNIPING_MODE:
+        case SNIPING_MODE_TOGGLE:
+        case DRAGSCROLL_MODE:
+        case DRAGSCROLL_MODE_TOGGLE:
+            return true;
+        default:
+            return is_mouse_record_user(keycode, record);
+    }
+}
+#    endif // POINTING_DEVICE_AUTO_MOUSE_ENABLE
+
+bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     if (!process_record_user(keycode, record)) {
         debug_charybdis_config_to_console(&g_charybdis_config);
         return false;
@@ -298,7 +525,21 @@ bool process_record_kb(uint16_t keycode, keyrecord_t* record) {
             break;
         case DRAGSCROLL_MODE_TOGGLE:
             if (record->event.pressed) {
-                charybdis_set_pointer_dragscroll_enabled(!charybdis_get_pointer_dragscroll_enabled());
+                bool new_state = !charybdis_get_pointer_dragscroll_enabled();
+                charybdis_set_pointer_dragscroll_enabled(new_state);
+
+#            ifdef POINTING_DEVICE_AUTO_MOUSE_ENABLE
+                // Keep auto mouse's target layer from timing out while dragscroll is latched.
+                bool toggled = get_auto_mouse_toggle();
+
+                if (new_state && !toggled) {
+                    // Dragscroll just turned ON → lock the auto mouse layer (no timeout)
+                    auto_mouse_toggle();
+                } else if (!new_state && toggled) {
+                    // Dragscroll just turned OFF → unlock, allow timeout again
+                    auto_mouse_toggle();
+                }
+#            endif
             }
             break;
     }
@@ -323,7 +564,7 @@ void matrix_init_kb(void) {
 }
 
 #    ifdef CHARYBDIS_CONFIG_SYNC
-void charybdis_config_sync_handler(uint8_t initiator2target_buffer_size, const void* initiator2target_buffer, uint8_t target2initiator_buffer_size, void* target2initiator_buffer) {
+void charybdis_config_sync_handler(uint8_t initiator2target_buffer_size, const void *initiator2target_buffer, uint8_t target2initiator_buffer_size, void *target2initiator_buffer) {
     if (initiator2target_buffer_size == sizeof(g_charybdis_config)) {
         memcpy(&g_charybdis_config, initiator2target_buffer, sizeof(g_charybdis_config));
     }
