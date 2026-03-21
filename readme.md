@@ -36,6 +36,12 @@ qmk compile -kb bastardkb/charybdis/4x6 -km default
 qmk compile -kb bastardkb/charybdis/4x6 -km noah
 ```
 
+## future qmk updates.
+git fetch qmk
+git merge qmk/master
+# fix conflicts (likely charybdis.c, auto_mouse.c — the files I touched)
+# compile, test
+
 ## Links
 
 - [QMK Firmware](https://github.com/qmk/qmk_firmware)
