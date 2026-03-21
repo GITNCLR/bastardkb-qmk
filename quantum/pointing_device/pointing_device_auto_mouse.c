@@ -107,6 +107,10 @@ int8_t get_auto_mouse_key_tracker(void) {
     return auto_mouse_context.status.mouse_key_tracker;
 }
 
+uint16_t auto_mouse_get_time_elapsed(void) {
+    return timer_elapsed(auto_mouse_context.timer.active);
+}
+
 /**
  * @brief Reset auto mouse context
  *
