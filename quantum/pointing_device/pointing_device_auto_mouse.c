@@ -108,7 +108,11 @@ int8_t get_auto_mouse_key_tracker(void) {
 }
 
 uint16_t auto_mouse_get_time_elapsed(void) {
-    return timer_elapsed(auto_mouse_context.timer.active);
+    return auto_mouse_get_time_elapsed_at(timer_read());
+}
+
+uint16_t auto_mouse_get_time_elapsed_at(uint16_t now) {
+    return (uint16_t)(now - auto_mouse_context.timer.active);
 }
 
 /**
